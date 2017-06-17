@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"net"
@@ -52,11 +53,13 @@ var (
 	rcode           = flag.String("rcode", "success", "set rcode to noerror|formerr|nxdomain|servfail|...")
 )
 
-func main() {
+var prop279Reader *bufio.Reader
+
+func doResolve(queryID int, v string, qt uint16, parseOnion bool) bool {
 	//serial := flag.Int("serial", 0, "perform an IXFR with this serial")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] [@server] [qtype...] [qclass...] [name ...]\n", os.Args[0])
-		flag.PrintDefaults()
+		//flag.PrintDefaults()
 	}
 
 	var (
@@ -219,7 +222,7 @@ func main() {
 
 			if e.Address == nil {
 				fmt.Fprintf(os.Stderr, "Failure to parse IP address: %s\n", *client)
-				return
+				return false
 			}
 
 			if *clientdraftcode {
@@ -243,15 +246,16 @@ func main() {
 		var err error
 		if co.Conn, err = net.DialTimeout(tcp, nameserver, 2*time.Second); err != nil {
 			fmt.Fprintf(os.Stderr, "Dialing "+nameserver+" failed: "+err.Error()+"\n")
-			return
+			return false
 		}
 		defer co.Close()
-		qt := dns.TypeA
+		//qt := dns.TypeA
 		qc := uint16(dns.ClassINET)
-		for i, v := range qname {
-			if i < len(qtype) {
-				qt = qtype[i]
-			}
+		//for i, v := range qname {
+		i := 0
+			//if i < len(qtype) {
+			//	qt = qtype[i]
+			//}
 			if i < len(qclass) {
 				qc = qclass[i]
 			}
@@ -264,55 +268,58 @@ func main() {
 					t.TsigSecret = map[string]string{name: secret}
 				} else {
 					fmt.Fprintf(os.Stderr, ";; TSIG key data error\n")
-					continue
+					//continue
+					return false
 				}
 			}
 			co.SetReadDeadline(time.Now().Add(2 * time.Second))
 			co.SetWriteDeadline(time.Now().Add(2 * time.Second))
 
 			if *query {
-				fmt.Printf("%s", m.String())
-				fmt.Printf("\n;; size: %d bytes\n\n", m.Len())
+				//fmt.Printf("%s", m.String())
+				//fmt.Printf("\n;; size: %d bytes\n\n", m.Len())
 			}
-			then := time.Now()
+			//then := time.Now()
 			if err := co.WriteMsg(m); err != nil {
 				fmt.Fprintf(os.Stderr, ";; %s\n", err.Error())
-				continue
+				//continue
+				return false
 			}
 			r, err := co.ReadMsg()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, ";; %s\n", err.Error())
-				continue
+				//continue
+				return false
 			}
-			rtt := time.Since(then)
+			//rtt := time.Since(then)
 			if r.Id != m.Id {
 				fmt.Fprintf(os.Stderr, "Id mismatch\n")
-				continue
+				//continue
+				return false
 			}
 
 			if *check {
 				sigCheck(r, nameserver, true)
 				denialCheck(r)
-				fmt.Println()
+				//fmt.Println()
 			}
 			if *short {
 				shortenMsg(r)
 			}
 
-			fmt.Printf("%v", r)
-			fmt.Printf("\n;; query time: %.3d µs, server: %s(%s), size: %d bytes\n", rtt/1e3, nameserver, tcp, r.Len())
-		}
-		return
+			return processAnswer(queryID, v, r.Answer, parseOnion)
+		//}
 	}
 
-	qt := dns.TypeA
+	//qt := dns.TypeA
 	qc := uint16(dns.ClassINET)
 
-Query:
-	for i, v := range qname {
-		if i < len(qtype) {
-			qt = qtype[i]
-		}
+//Query:
+	//for i, v := range qname {
+	i := 0
+		//if i < len(qtype) {
+		//	qt = qtype[i]
+		//}
 		if i < len(qclass) {
 			qc = qclass[i]
 		}
@@ -325,35 +332,44 @@ Query:
 				t.TsigSecret = map[string]string{name: secret}
 			} else {
 				fmt.Fprintf(os.Stderr, "TSIG key data error\n")
-				continue
+				//continue
+				return false
 			}
 		}
 		if *query {
-			fmt.Printf("%s", m.String())
-			fmt.Printf("\n;; size: %d bytes\n\n", m.Len())
+			//fmt.Printf("%s", m.String())
+			//fmt.Printf("\n;; size: %d bytes\n\n", m.Len())
 		}
 		if qt == dns.TypeAXFR || qt == dns.TypeIXFR {
 			env, err := t.In(m, nameserver)
 			if err != nil {
-				fmt.Printf(";; %s\n", err.Error())
-				continue
+				//fmt.Printf(";; %s\n", err.Error())
+				fmt.Fprintf(os.Stderr, ";; %s\n", err.Error())
+				//continue
+				return false
 			}
 			var envelope, record int
 			for e := range env {
 				if e.Error != nil {
-					fmt.Printf(";; %s\n", e.Error.Error())
-					continue Query
+					//fmt.Printf(";; %s\n", e.Error.Error())
+					fmt.Fprintf(os.Stderr, ";; %s\n", e.Error.Error())
+					//continue Query
+					return false
 				}
 				for _, r := range e.RR {
-					fmt.Printf("%s\n", r)
+					//fmt.Printf("%s\n", r)
+					fmt.Fprintf(os.Stderr, "%s\n", r)
 				}
 				record += len(e.RR)
 				envelope++
 			}
-			fmt.Printf("\n;; xfr size: %d records (envelopes %d)\n", record, envelope)
-			continue
+			//fmt.Printf("\n;; xfr size: %d records (envelopes %d)\n", record, envelope)
+			fmt.Fprintf(os.Stderr, "\n;; xfr size: %d records (envelopes %d)\n", record, envelope)
+			//continue
+			return false
 		}
-		r, rtt, err := c.Exchange(m, nameserver)
+		//r, rtt, err := c.Exchange(m, nameserver)
+		r, _, err := c.Exchange(m, nameserver)
 	Redo:
 		switch err {
 		case nil:
@@ -361,46 +377,54 @@ Query:
 		case dns.ErrTruncated:
 			if *fallback {
 				if !*dnssec {
-					fmt.Printf(";; Truncated, trying %d bytes bufsize\n", dns.DefaultMsgSize)
+					//fmt.Printf(";; Truncated, trying %d bytes bufsize\n", dns.DefaultMsgSize)
+					fmt.Fprintf(os.Stderr, ";; Truncated, trying %d bytes bufsize\n", dns.DefaultMsgSize)
 					o := new(dns.OPT)
 					o.Hdr.Name = "."
 					o.Hdr.Rrtype = dns.TypeOPT
 					o.SetUDPSize(dns.DefaultMsgSize)
 					m.Extra = append(m.Extra, o)
-					r, rtt, err = c.Exchange(m, nameserver)
+					//r, rtt, err = c.Exchange(m, nameserver)
+					r, _, err = c.Exchange(m, nameserver)
 					*dnssec = true
 					goto Redo
 				} else {
 					// First EDNS, then TCP
-					fmt.Printf(";; Truncated, trying TCP\n")
+					//fmt.Printf(";; Truncated, trying TCP\n")
+					fmt.Fprintf(os.Stderr, ";; Truncated, trying TCP\n")
 					c.Net = "tcp"
-					r, rtt, err = c.Exchange(m, nameserver)
+					//r, rtt, err = c.Exchange(m, nameserver)
+					r, _, err = c.Exchange(m, nameserver)
 					*fallback = false
 					goto Redo
 				}
 			}
-			fmt.Printf(";; Truncated\n")
+			//fmt.Printf(";; Truncated\n")
+			fmt.Fprintf(os.Stderr, ";; Truncated\n")
 		default:
-			fmt.Printf(";; %s\n", err.Error())
-			continue
+			//fmt.Printf(";; %s\n", err.Error())
+			fmt.Fprintf(os.Stderr, ";; %s\n", err.Error())
+			//continue
+			return false
 		}
 		if r.Id != m.Id {
 			fmt.Fprintf(os.Stderr, "Id mismatch\n")
-			return
+			return false
 		}
 
 		if *check {
 			sigCheck(r, nameserver, *tcp)
 			denialCheck(r)
-			fmt.Println()
+			//fmt.Println()
 		}
 		if *short {
 			shortenMsg(r)
 		}
 
-		fmt.Printf("%v", r)
-		fmt.Printf("\n;; query time: %.3d µs, server: %s(%s), size: %d bytes\n", rtt/1e3, nameserver, c.Net, r.Len())
-	}
+		return processAnswer(queryID, v, r.Answer, parseOnion)
+	//}
+
+	//return false
 }
 
 func tsigKeyParse(s string) (algo, name, secret string, ok bool) {
@@ -436,7 +460,8 @@ func sectionCheck(set []dns.RR, server string, tcp bool) {
 				key = dnskey
 			}
 			if key == nil {
-				fmt.Printf(";? DNSKEY %s/%d not found\n", rr.(*dns.RRSIG).SignerName, rr.(*dns.RRSIG).KeyTag)
+				//fmt.Printf(";? DNSKEY %s/%d not found\n", rr.(*dns.RRSIG).SignerName, rr.(*dns.RRSIG).KeyTag)
+				fmt.Fprintf(os.Stderr, ";? DNSKEY %s/%d not found\n", rr.(*dns.RRSIG).SignerName, rr.(*dns.RRSIG).KeyTag)
 				continue
 			}
 			where := "net"
@@ -444,10 +469,12 @@ func sectionCheck(set []dns.RR, server string, tcp bool) {
 				where = "disk"
 			}
 			if err := rr.(*dns.RRSIG).Verify(key, rrset); err != nil {
-				fmt.Printf(";- Bogus signature, %s does not validate (DNSKEY %s/%d/%s) [%s] %s\n",
+				//fmt.Printf(";- Bogus signature, %s does not validate (DNSKEY %s/%d/%s) [%s] %s\n",
+				fmt.Fprintf(os.Stderr, ";- Bogus signature, %s does not validate (DNSKEY %s/%d/%s) [%s] %s\n",
 					shortSig(rr.(*dns.RRSIG)), key.Header().Name, key.KeyTag(), where, err.Error(), expired)
 			} else {
-				fmt.Printf(";+ Secure signature, %s validates (DNSKEY %s/%d/%s) %s\n", shortSig(rr.(*dns.RRSIG)), key.Header().Name, key.KeyTag(), where, expired)
+				//fmt.Printf(";+ Secure signature, %s validates (DNSKEY %s/%d/%s) %s\n", shortSig(rr.(*dns.RRSIG)), key.Header().Name, key.KeyTag(), where, expired)
+				fmt.Fprintf(os.Stderr, ";+ Secure signature, %s validates (DNSKEY %s/%d/%s) %s\n", shortSig(rr.(*dns.RRSIG)), key.Header().Name, key.KeyTag(), where, expired)
 			}
 		}
 	}
@@ -478,7 +505,8 @@ func denialCheck(in *dns.Msg) {
 	if len(denial) > 0 {
 		denial3(denial, in)
 	}
-	fmt.Printf(";+ Unimplemented: check for denial-of-existence for nsec\n")
+	//fmt.Printf(";+ Unimplemented: check for denial-of-existence for nsec\n")
+	fmt.Fprintf(os.Stderr, ";+ Unimplemented: check for denial-of-existence for nsec\n")
 	return
 }
 
@@ -491,14 +519,18 @@ func denial3(nsec3 []dns.RR, in *dns.Msg) {
 		// qname should match nsec3, type should not be in bitmap
 		match := nsec3[0].(*dns.NSEC3).Match(qname)
 		if !match {
-			fmt.Printf(";- Denial, owner name does not match qname\n")
-			fmt.Printf(";- Denial, failed authenticated denial of existence proof for no data\n")
+			//fmt.Printf(";- Denial, owner name does not match qname\n")
+			//fmt.Printf(";- Denial, failed authenticated denial of existence proof for no data\n")
+			fmt.Fprintf(os.Stderr, ";- Denial, owner name does not match qname\n")
+			fmt.Fprintf(os.Stderr, ";- Denial, failed authenticated denial of existence proof for no data\n")
 			return
 		}
 		for _, t := range nsec3[0].(*dns.NSEC3).TypeBitMap {
 			if t == qtype {
-				fmt.Printf(";- Denial, found type, %d, in bitmap\n", qtype)
-				fmt.Printf(";- Denial, failed authenticated denial of existence proof for no data\n")
+				//fmt.Printf(";- Denial, found type, %d, in bitmap\n", qtype)
+				//fmt.Printf(";- Denial, failed authenticated denial of existence proof for no data\n")
+				fmt.Fprintf(os.Stderr, ";- Denial, found type, %d, in bitmap\n", qtype)
+				fmt.Fprintf(os.Stderr, ";- Denial, failed authenticated denial of existence proof for no data\n")
 				return
 			}
 			if t > qtype { // ordered list, bail out, because not found
@@ -506,10 +538,12 @@ func denial3(nsec3 []dns.RR, in *dns.Msg) {
 			}
 		}
 		// Some success data printed here
-		fmt.Printf(";+ Denial, matching record, %s, (%s) found and type %s denied\n", qname,
+		//fmt.Printf(";+ Denial, matching record, %s, (%s) found and type %s denied\n", qname,
+		fmt.Fprintf(os.Stderr, ";+ Denial, matching record, %s, (%s) found and type %s denied\n", qname,
 			strings.ToLower(dns.HashName(qname, nsec3[0].(*dns.NSEC3).Hash, nsec3[0].(*dns.NSEC3).Iterations, nsec3[0].(*dns.NSEC3).Salt)),
 			dns.TypeToString[qtype])
-		fmt.Printf(";+ Denial, secure authenticated denial of existence proof for no data\n")
+		//fmt.Printf(";+ Denial, secure authenticated denial of existence proof for no data\n")
+		fmt.Fprintf(os.Stderr, ";+ Denial, secure authenticated denial of existence proof for no data\n")
 		return
 	case dns.RcodeNameError: // NXDOMAIN Proof
 		indx := dns.Split(qname)
@@ -532,30 +566,37 @@ func denial3(nsec3 []dns.RR, in *dns.Msg) {
 			}
 		}
 		if ce == "" {
-			fmt.Printf(";- Denial, closest encloser not found\n")
+			//fmt.Printf(";- Denial, closest encloser not found\n")
+			fmt.Fprintf(os.Stderr, ";- Denial, closest encloser not found\n")
 			return
 		}
-		fmt.Printf(";+ Denial, closest encloser, %s (%s)\n", ce,
+		//fmt.Printf(";+ Denial, closest encloser, %s (%s)\n", ce,
+		fmt.Fprintf(os.Stderr, ";+ Denial, closest encloser, %s (%s)\n", ce,
 			strings.ToLower(dns.HashName(ce, nsec3[0].(*dns.NSEC3).Hash, nsec3[0].(*dns.NSEC3).Iterations, nsec3[0].(*dns.NSEC3).Salt)))
 		covered := 0 // Both nc and wc must be covered
 		for i := 0; i < len(nsec3); i++ {
 			if nsec3[i].(*dns.NSEC3).Cover(nc) {
-				fmt.Printf(";+ Denial, next closer %s (%s), covered by %s -> %s\n", nc, nsec3[i].Header().Name, nsec3[i].(*dns.NSEC3).NextDomain,
+				//fmt.Printf(";+ Denial, next closer %s (%s), covered by %s -> %s\n", nc, nsec3[i].Header().Name, nsec3[i].(*dns.NSEC3).NextDomain,
+				fmt.Fprintf(os.Stderr, ";+ Denial, next closer %s (%s), covered by %s -> %s\n", nc, nsec3[i].Header().Name, nsec3[i].(*dns.NSEC3).NextDomain,
 					strings.ToLower(dns.HashName(ce, nsec3[0].(*dns.NSEC3).Hash, nsec3[0].(*dns.NSEC3).Iterations, nsec3[0].(*dns.NSEC3).Salt)))
 				covered++
 			}
 			if nsec3[i].(*dns.NSEC3).Cover(wc) {
-				fmt.Printf(";+ Denial, source of synthesis %s (%s), covered by %s -> %s\n", wc, nsec3[i].Header().Name, nsec3[i].(*dns.NSEC3).NextDomain,
+				//fmt.Printf(";+ Denial, source of synthesis %s (%s), covered by %s -> %s\n", wc, nsec3[i].Header().Name, nsec3[i].(*dns.NSEC3).NextDomain,
+				fmt.Fprintf(os.Stderr, ";+ Denial, source of synthesis %s (%s), covered by %s -> %s\n", wc, nsec3[i].Header().Name, nsec3[i].(*dns.NSEC3).NextDomain,
 					strings.ToLower(dns.HashName(ce, nsec3[0].(*dns.NSEC3).Hash, nsec3[0].(*dns.NSEC3).Iterations, nsec3[0].(*dns.NSEC3).Salt)))
 				covered++
 			}
 		}
 		if covered != 2 {
-			fmt.Printf(";- Denial, too many, %d, covering records\n", covered)
-			fmt.Printf(";- Denial, failed authenticated denial of existence proof for name error\n")
+			//fmt.Printf(";- Denial, too many, %d, covering records\n", covered)
+			//fmt.Printf(";- Denial, failed authenticated denial of existence proof for name error\n")
+			fmt.Fprintf(os.Stderr, ";- Denial, too many, %d, covering records\n", covered)
+			fmt.Fprintf(os.Stderr, ";- Denial, failed authenticated denial of existence proof for name error\n")
 			return
 		}
-		fmt.Printf(";+ Denial, secure authenticated denial of existence proof for name error\n")
+		//fmt.Printf(";+ Denial, secure authenticated denial of existence proof for name error\n")
+		fmt.Fprintf(os.Stderr, ";+ Denial, secure authenticated denial of existence proof for name error\n")
 		return
 	}
 }
@@ -628,4 +669,134 @@ func shortRR(r dns.RR) dns.RR {
 		}
 	}
 	return r
+}
+
+func processAnswer(queryID int, name string, rrs []dns.RR, parseOnion bool) bool {
+	if parseOnion {
+		for _, answer := range rrs {
+			answerTXT, ok := answer.(*dns.TXT)
+			if ok {
+				onion := answerTXT.Txt[0]
+
+				_, isDomainName := dns.IsDomainName(onion)
+				if ! isDomainName {
+					continue
+				}
+
+				if ! strings.HasSuffix(onion, ".onion") {
+					continue
+				}
+
+				fmt.Printf("RESOLVED %d 0 %s\n", queryID, onion)
+				return true
+			}
+		}
+	} else {
+		for _, answer := range rrs {
+			answerA, ok := answer.(*dns.A)
+			if ok {
+				fmt.Printf("RESOLVED %d 0 %s\n", queryID, answerA.A.String())
+				return true
+			}
+		}
+
+		for _, answer := range rrs {
+			answerAAAA, ok := answer.(*dns.AAAA)
+			if ok {
+				fmt.Printf("RESOLVED %d 0 %s\n", queryID, answerAAAA.AAAA.String())
+				return true
+			}
+		}
+
+		for _, answer := range rrs {
+			answerCNAME, ok := answer.(*dns.CNAME)
+			target := answerCNAME.Target
+
+			if ! dns.IsFqdn(target) {
+				continue
+			}
+			target = strings.TrimSuffix(target, ".")
+
+			if ok {
+				fmt.Printf("RESOLVED %d 0 %s\n", queryID, target)
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func main() {
+	prop279Reader = bufio.NewReader(os.Stdin)
+	fmt.Println("INIT 1 0")
+
+	for {
+		line, err := prop279Reader.ReadString('\n')
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Couldn't read stdin: %s\n", err)
+			os.Exit(3)
+		}
+
+		words := strings.Fields(line)
+
+		if len(words) < 1 {
+			continue
+		}
+
+		if words[0] == "RESOLVE" {
+			if len(words) < 3 {
+				continue
+			}
+
+			queryIDStr := words[1]
+			queryID, err := strconv.Atoi(queryIDStr)
+			if err != nil {
+				continue
+			}
+
+			name := words[2]
+			originalName := name
+			onlyOnion := false
+
+			if strings.HasSuffix(name, ".onion") {
+				name = strings.TrimSuffix(name, ".onion")
+				onlyOnion = true
+			}
+
+			success := false
+
+			if !success {
+				success = doResolve(queryID, "_tor." + name, dns.TypeTXT, true)
+			}
+
+			if !onlyOnion {
+				if !success {
+					success = doResolve(queryID, name, dns.TypeA, false)
+				}
+				if !success {
+					success = doResolve(queryID, name, dns.TypeAAAA, false)
+				}
+				if !success {
+					success = doResolve(queryID, name, dns.TypeCNAME, false)
+				}
+			}
+			if !success {
+				fmt.Printf("RESOLVED %d 3 \"%s not available\"\n", queryID, originalName)
+			}
+		} else if words[0] == "CANCEL" {
+			if len(words) < 2 {
+				continue
+			}
+
+			queryIDStr := words[1]
+			queryID, err := strconv.Atoi(queryIDStr)
+			if err != nil {
+				continue
+			}
+
+			fmt.Printf("CANCELED %d\n", queryID)
+		}
+	}
 }
