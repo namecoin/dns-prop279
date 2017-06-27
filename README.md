@@ -4,7 +4,7 @@
 
 ## Usage
 
-You need [LibreTorNS](https://github.com/namecoin/LibreTorNS) in order to use `dns-prop279`.  You also need a DNS server such as [ncdns](https://github.com/namecoin/ncdns).  Your LibreTorNS services configuration might look like this:
+You need [TorNS](https://github.com/meejah/TorNS) in order to use `dns-prop279`.  You also need a DNS server such as [ncdns](https://github.com/namecoin/ncdns).  Your TorNS services configuration might look like this:
 
 ~~~
 _service_to_command = {
