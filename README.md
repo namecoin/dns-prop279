@@ -17,7 +17,7 @@ _service_to_command = {
 
 * `dns-prop279` hasn't been carefully checked for proxy leaks.
 * Using `dns-prop279` will make you stand out from other Tor users.
-* Stream isolation isn't supported at all.  Only use `dns-prop279` with a DNS server that will not generate outgoing traffic when you query it.  ncdns is probably fine as long as it's using a full-block-receive Namecoin node such as Namecoin Core or libdohj-namecoin in leveldbtxcache mode.  Unbound is not a good idea.
+* Stream isolation for streams opened by applications (e.g. Tor Browser) should work fine.  However, stream isolation metadata won't propagate to streams opened by the DNS server.  That means you should only use `dns-prop279` with a DNS server that will not generate outgoing traffic when you query it.  ncdns is probably fine as long as it's using a full-block-receive Namecoin node such as Namecoin Core or libdohj-namecoin in leveldbtxcache mode.  Unbound is not a good idea.
 * Nothing in `dns-prop279` prevents the configured DNS server from caching lookups.  If lookups are cached, this could be used to fingerprint users.  ncdns has caching enabled by default.
 * DNSSEC support hasn't been tested at all, and is probably totally unsafe right now.  Only use `dns-prop279` when you fully trust the configured DNS server and your network path to it.
 * This whole thing is highly experimental!  Please test it and give feedback, but **don't rely on it behaving correctly**.
