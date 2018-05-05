@@ -705,6 +705,10 @@ func processAnswer(queryID int, name string, rrs []dns.RR, parseOnion bool) bool
 
 		for _, answer := range rrs {
 			answerCNAME, ok := answer.(*dns.CNAME)
+			if !ok {
+				continue
+			}
+
 			target := answerCNAME.Target
 
 			if ! dns.IsFqdn(target) {
@@ -712,10 +716,8 @@ func processAnswer(queryID int, name string, rrs []dns.RR, parseOnion bool) bool
 			}
 			target = strings.TrimSuffix(target, ".")
 
-			if ok {
-				fmt.Printf("RESOLVED %d 0 %s\n", queryID, target)
-				return true
-			}
+			fmt.Printf("RESOLVED %d 0 %s\n", queryID, target)
+			return true
 		}
 	}
 
